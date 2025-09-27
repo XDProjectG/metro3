@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>不囉唆的節拍器 3.0 by NiceChord 好和弦</title>
+<style>
+
+    a {
+        color:rgb(17, 81, 136);
+        font-weight: bolder;
+    }
+    input {
+    	font-family: monospace;
+        margin-top: 0px;
+        font-size: 24px;
+    }
+    button {
+        padding: 1px 14px;
+        font-size: 20px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Roboto', sans-serif;
+        border-radius: 3px;
+        border: 1px #777;
+        background: #eee;
+        box-shadow: 0px 0.5px 1px rgba(0, 0, 0, 0.2), inset 0px 0.5px 0.5px rgba(255, 255, 255, 0.5), 0px 0px 0px 0.5px rgba(0, 0, 0, 0.2);
+        color: #333;
+        user-select: none;
+        -webkit-user-select: none;
+        touch-action: manipulation;
+    }
+    button:focus {
+        box-shadow: inset 0px 0.8px 0px -0.25px rgba(255, 255, 255, 0.2), 0px 0.5px 1px rgba(0, 0, 0, 0.1), 0px 0px 0px 3.5px rgba(58, 108, 217, 0.5);
+        outline: 0;
+    }
+    .error-message {
+        color: red;
+        font-size: 14px;
+        margin-left: 10px;
+    }
+    .preset-buttons {
+        margin-top: 8px;
+    }
+    .preset-buttons button {
+        margin-right: 2px;
+        font-size: 16px;
+        padding: 0px 8px;
+    }
+    #subbeats {
+    	font-size: 16px
+    }
+    p {
+    	line-height: 1.1;
+    	margin-bottom: 10px;
+    	margin-top: 0px;
+    }
+    p + p {
+    	margin-top: 0px;	
+    }
+</style>
+<body>
+    <p><b>不囉唆的節拍器 3.0</b> by <a href="https://nicechord.com/">NiceChord 好和弦</a><br /></p>
+    <input id="bpm" type="number" value="100" min="1" max="999" onchange="updateBPM();" onclick="select_all();" onkeypress="onTestChange();"> 
+    <button id="start" type="button" ontouchend="metrostart();" onclick="metrostart();">開始</button>
+    <button id="stop" type="button" ontouchend="metrostop();" onclick="metrostop();">停止</button>
+
+    <p><br />輸入拍子細分割（0 到 1 之間數字，用逗號分隔）：</p>
+    <input id="subbeats" type="text" placeholder="例如：0.5 或 0.25,0.5,0.75" oninput="updateSubBeats();" style="width: 300px;">
+    <span id="error-message" class="error-message"></span>
+	<p><br />快速設定：</p>
+    <div class="preset-buttons">
+        <button onclick="setPreset('0.5')">八分</button>
+        <button onclick="setPreset('0.333,0.666')">三連音</button>
+        <button onclick="setPreset('0.25,0.5,0.75')">十六分</button>
+        <button onclick="setPreset('0.75')">附點</button>
+        <button onclick="setPreset('0.666')">66% Swing</button>
+    </div>
+    <div class="preset-buttons">
+        <button onclick="setPreset('0.2,0.4,0.6,0.8')">五連音</button>
+        <button onclick="setPreset('0.166,0.333,0.5,0.666,0.833')">六連音</button>
+        <button onclick="setPreset('0.143,0.286,0.429,0.571,0.714,0.857')">七連音</button>
+        <button onclick="setPreset('0.333,0.5,0.666')">二對三</button>
+        <button onclick="setPreset('0.58')">有點 Swing</button>
+    </div>
+
+    <script type="text/javascript">
+    let audioContext = null;
+    let isPlaying = false;
+    let bpm = 100;
+    let subBeatPositions = [];
+    let lookahead = 25; // 預先排程的時間（毫秒）
+    let scheduleAheadTime = 0.1; // 預先排程的秒數
+    let nextNoteTime = 0.0; // 下一個音符的時間
+    let timerID = null; // 排程計時器
+    let noteLength = 0.05; // 主拍音符長度（秒）
+    let subBeatLength = 0.03; // 副拍音符長度（秒）
+    let noteFrequency = 523.25; // C5 頻率
+    let subBeatFrequency = 392; // G4 頻率
+
+    // 初始化
+    function init() {
+        bpm = document.getElementById('bpm').value;
+        
+        // 檢查瀏覽器支援
+        try {
+            window.AudioContext = window.AudioContext || window.webkitAudioContext;
+            audioContext = new AudioContext();
+        } catch(e) {
+            alert('Web Audio API 不被您的瀏覽器支援。');
+        }
+    }
+
+    // 排程主拍音符
+    function scheduleNote(time) {
+        // 振盪器
+        const osc = audioContext.createOscillator();
+        osc.type = 'square';
+        osc.frequency.value = noteFrequency;
+        
+        // 音量
+        const gainNode = audioContext.createGain();
+        gainNode.gain.value = 0.25;
+                
+        // ADSR
+        gainNode.gain.setValueAtTime(0.25, time);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, time + noteLength);
+        
+        // 連接節點
+        osc.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        
+        // 啟動和停止振盪器
+        osc.start(time);
+        osc.stop(time + noteLength);
+    }
+
+    // 排程副拍音符
+    function scheduleSubBeat(time) {
+        // 振盪器
+        const osc = audioContext.createOscillator();
+        osc.type = 'square';
+        osc.frequency.value = subBeatFrequency;
+        
+        // 音量（比主拍小一點）
+        const gainNode = audioContext.createGain();
+        gainNode.gain.value = 0.15;
+                
+        // ADSR
+        gainNode.gain.setValueAtTime(0.15, time);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, time + subBeatLength);
+        
+        // 連接節點
+        osc.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        
+        // 啟動和停止振盪器
+        osc.start(time);
+        osc.stop(time + subBeatLength);
+    }
+
+    // 排程器（負責預先排程音符）
+    function scheduler() {
+        while (nextNoteTime < audioContext.currentTime + scheduleAheadTime) {
+            // 排程主拍
+            scheduleNote(nextNoteTime);
+            
+            // 排程所有副拍
+            let secondsPerBeat = 60.0 / bpm;
+            subBeatPositions.forEach(position => {
+                scheduleSubBeat(nextNoteTime + secondsPerBeat * position);
+            });
+            
+            nextBeat();
+        }
+        timerID = setTimeout(scheduler, lookahead);
+    }
+
+    // 計算下一個音符時間
+    function nextBeat() {
+        // 根據 BPM 計算四分音符的時間（秒）
+        let secondsPerBeat = 60.0 / bpm;
+        
+        // 增加時間到下一個音符
+        nextNoteTime += secondsPerBeat;
+    }
+
+    // 開始節拍器
+    function metrostart() {
+        // 如果 AudioContext 暫停或尚未初始化，則初始化或恢復
+        if (!audioContext) {
+            init();
+        } else if (audioContext.state === 'suspended') {
+            audioContext.resume();
+        }
+        
+        if (!isPlaying) {
+            isPlaying = true;
+            nextNoteTime = audioContext.currentTime;
+            scheduler();
+        }
+    }
+
+    // 停止節拍器
+    function metrostop() {
+        isPlaying = false;
+        clearTimeout(timerID);
+    }
+
+    // 更新 BPM
+    function updateBPM() {
+        bpm = parseInt(document.getElementById('bpm').value);
+        if (bpm < 1) bpm = 1;
+        if (bpm > 999) bpm = 999;
+    }
+
+    // 解析副拍設定
+    function parseSubBeats(inputString) {
+        if (!inputString || inputString.trim() === '') {
+            return [];
+        }
+        
+        try {
+            const values = inputString.split(',').map(s => s.trim()).filter(s => s !== '');
+            const validPositions = [];
+            
+            for (let value of values) {
+                const num = parseFloat(value);
+                if (isNaN(num)) continue;
+                if (num > 0 && num < 1) {
+                    validPositions.push(num);
+                }
+            }
+            
+            // 排序並去重
+            return [...new Set(validPositions)].sort();
+        } catch (e) {
+            throw new Error('解析錯誤');
+        }
+    }
+
+    // 更新副拍設定
+    function updateSubBeats() {
+        const input = document.getElementById('subbeats');
+        const errorElement = document.getElementById('error-message');
+        
+        try {
+            subBeatPositions = parseSubBeats(input.value);
+            errorElement.textContent = '';
+        } catch (e) {
+            errorElement.textContent = '輸入格式錯誤';
+            subBeatPositions = [];
+        }
+    }
+
+    // 設定預設值
+    function setPreset(preset) {
+        document.getElementById('subbeats').value = preset;
+        updateSubBeats();
+    }
+
+    // 選取全部文字
+    function select_all() {
+        document.getElementById('bpm').select();
+    }
+
+    // 按下 Enter 時啟動節拍器
+    function onTestChange() {
+        var key = window.event.keyCode;
+        
+        // 如果使用者按下 Enter
+        if (key === 13) {
+            metrostart();
+            return false;
+        } else {
+            return true;
+        }
+    }
+
+    // 當頁面載入完成後初始化
+    window.addEventListener('load', function() {
+        init();
+    });
+    </script>
+</body>
