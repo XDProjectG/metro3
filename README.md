@@ -4,6 +4,8 @@
 
 ## 不囉唆，直接用
 
+https://xdprojectg.github.io/metro3/
+
 https://nicechord.com/metro3
 
 ## 介紹影片
