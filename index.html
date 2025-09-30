@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>不囉唆的節拍器 3.0 by NiceChord 好和弦</title>
+<title>不囉唆的節拍器 fork version</title>
 <style>
 
     a {
@@ -115,7 +115,7 @@
     function scheduleNote(time) {
         // 振盪器
         const osc = audioContext.createOscillator();
-        osc.type = 'square';
+        osc.type = 'triangle';
         osc.frequency.value = noteFrequency;
         
         // 音量
